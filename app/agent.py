@@ -297,8 +297,17 @@ async def entrypoint(ctx: JobContext):
             # min_duration/min_words entirely and uses its own probability threshold,
             # which was firing on sub-100ms noise bursts (breath, echo of the agent's own
             # voice through speakers) and cutting the agent off mid-sentence. "vad" mode
-            # is deterministic and actually honors these thresholds.
-            "interruption": {"mode": "vad", "min_duration": 0.6, "min_words": 2},
+            # is deterministic and actually honors these thresholds. Thresholds are biased
+            # high (vs. the usual 0.5s/0 words) because our audio output routes through the
+            # avatar and can't pause/resume — a false interruption permanently drops the
+            # rest of that sentence, so it's worth trading a little barge-in speed for
+            # fewer false positives.
+            "interruption": {
+                "mode": "vad",
+                "min_duration": 0.8,
+                "min_words": 3,
+                "resume_false_interruption": False,
+            },
         },
     )
 
@@ -307,12 +316,9 @@ async def entrypoint(ctx: JobContext):
 
     await session.start(agent=agent, room=ctx.room)
 
-    await session.generate_reply(
-        instructions=(
-            "Warmly welcome the caller to the clinic front desk as Aria, ask how they're doing today, "
-            "then ask how you can help. Keep it to 1-2 short, friendly sentences."
-        )
-    )
+    # A fixed greeting goes straight to TTS with no LLM round-trip, so there's no visible
+    # "thinking" step between the avatar becoming ready and Aria actually speaking.
+    session.say("Welcome to our clinic! How are you doing today? How can I help you?")
 
 
 if __name__ == "__main__":
