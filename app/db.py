@@ -6,7 +6,7 @@ import sqlite3
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "voice_agent.db"
@@ -111,7 +111,7 @@ class Database:
             if row is None:
                 conn.execute(
                     "INSERT INTO users (phone, name, created_at) VALUES (?, ?, ?)",
-                    (phone, name, datetime.utcnow().isoformat()),
+                    (phone, name, datetime.now(UTC).isoformat()),
                 )
                 return {"phone": phone, "name": name, "is_new": True}
             if name and not row["name"]:
@@ -127,7 +127,7 @@ class Database:
             return [r["time"] for r in rows]
 
     def available_slots(self, date: str | None = None, days_ahead: int = 7) -> dict[str, list[str]]:
-        today = datetime.utcnow().date()
+        today = datetime.now(UTC).date()
         if date:
             dates = [date]
         else:
@@ -141,7 +141,7 @@ class Database:
     def book_appointment(self, phone: str, name: str | None, date: str, time: str) -> Appointment:
         if time not in SLOT_TIMES:
             raise ValueError(f"'{time}' is not a valid slot time. Valid times: {SLOT_TIMES}")
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(UTC).isoformat()
         with self._lock, self._connect() as conn:
             existing = conn.execute(
                 "SELECT id FROM appointments WHERE date = ? AND time = ? AND status = 'booked'",
@@ -180,7 +180,7 @@ class Database:
             ).fetchone()
             if row is None:
                 raise AppointmentNotFoundError(f"No active appointment found for {date} {time}.")
-            now = datetime.utcnow().isoformat()
+            now = datetime.now(UTC).isoformat()
             conn.execute(
                 "UPDATE appointments SET status = 'cancelled', updated_at = ? WHERE id = ?",
                 (now, row["id"]),
@@ -208,7 +208,7 @@ class Database:
                 raise DoubleBookingError(f"Slot {new_date} {new_time} is already booked.")
             if new_time not in SLOT_TIMES:
                 raise ValueError(f"'{new_time}' is not a valid slot time. Valid times: {SLOT_TIMES}")
-            now = datetime.utcnow().isoformat()
+            now = datetime.now(UTC).isoformat()
             conn.execute(
                 "UPDATE appointments SET date = ?, time = ?, updated_at = ? WHERE id = ?",
                 (new_date, new_time, now, row["id"]),
@@ -230,7 +230,7 @@ class Database:
     ) -> dict:
         import json
 
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(UTC).isoformat()
         with self._lock, self._connect() as conn:
             cur = conn.execute(
                 "INSERT INTO call_summaries (phone, room_name, summary, appointments_json, preferences, intent, created_at) "

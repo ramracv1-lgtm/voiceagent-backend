@@ -11,7 +11,7 @@ import asyncio
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, UTC
 
 from dotenv import load_dotenv
 from livekit.agents import (
@@ -57,6 +57,9 @@ Conversation flow:
 
 Always extract and remember: caller's name, phone number, requested date/time, and their intent (why they're calling).
 Never invent appointment data — only state what tools actually returned. Keep responses short; this is a phone call, not a chat window.
+
+Today's date is {today} ({weekday}). Resolve relative dates the caller says ("tomorrow", "next Monday",
+"this Friday") against this before calling any tool — tools only accept absolute YYYY-MM-DD dates.
 """
 
 PHONE_RE = re.compile(r"\D")
@@ -69,7 +72,9 @@ def normalize_phone(raw: str) -> str:
 
 class FrontDeskAgent(Agent):
     def __init__(self, job_ctx: JobContext):
-        super().__init__(instructions=INSTRUCTIONS)
+        now = datetime.now(UTC)
+        instructions = INSTRUCTIONS.format(today=now.date().isoformat(), weekday=now.strftime("%A"))
+        super().__init__(instructions=instructions)
         self._job_ctx = job_ctx
         self._room = job_ctx.room
         self.phone: str | None = None
@@ -88,7 +93,7 @@ class FrontDeskAgent(Agent):
                 "status": status,
                 "message": message,
                 "data": data or {},
-                "ts": datetime.utcnow().isoformat(),
+                "ts": datetime.now(UTC).isoformat(),
             }
         )
         try:
