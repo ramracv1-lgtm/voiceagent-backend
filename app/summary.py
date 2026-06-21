@@ -46,7 +46,7 @@ async def generate_call_summary(
     try:
         client = AsyncGroq(api_key=os.environ["GROQ_API_KEY"])
         resp = await client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="llama-3.1-8b-instant",
             temperature=0.2,
             max_tokens=300,
             messages=[

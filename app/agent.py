@@ -89,7 +89,9 @@ def looks_like_placeholder_phone(digits: str) -> bool:
 class FrontDeskAgent(Agent):
     def __init__(self, job_ctx: JobContext):
         now = datetime.now(UTC)
-        instructions = INSTRUCTIONS.format(today=now.date().isoformat(), weekday=now.strftime("%A"))
+        instructions = INSTRUCTIONS.format(
+            today=now.date().isoformat(), weekday=now.strftime("%A")
+        )
         super().__init__(instructions=instructions)
         self._job_ctx = job_ctx
         self._room = job_ctx.room
@@ -101,7 +103,9 @@ class FrontDeskAgent(Agent):
 
     # ---- UI event helper -------------------------------------------------
 
-    async def _notify(self, tool: str, status: str, message: str, data: dict | None = None) -> None:
+    async def _notify(
+        self, tool: str, status: str, message: str, data: dict | None = None
+    ) -> None:
         payload = json.dumps(
             {
                 "type": "tool_call",
@@ -113,14 +117,18 @@ class FrontDeskAgent(Agent):
             }
         )
         try:
-            await self._room.local_participant.publish_data(payload, topic="tool-status", reliable=True)
+            await self._room.local_participant.publish_data(
+                payload, topic="tool-status", reliable=True
+            )
         except Exception:
             logger.exception("failed to publish tool-status event")
 
     # ---- Tools -------------------------------------------------------------
 
     @function_tool()
-    async def identify_user(self, phone_number: str, caller_name: str | None = None) -> str:
+    async def identify_user(
+        self, phone_number: str, caller_name: str | None = None
+    ) -> str:
         """Identify the caller by phone number. Always call this before any booking/retrieval/cancel/modify action.
 
         Args:
@@ -129,8 +137,20 @@ class FrontDeskAgent(Agent):
         """
         await self._notify("identify_user", "running", "Looking up caller...")
         phone = normalize_phone(phone_number)
-        if len(phone) < 7 or looks_like_placeholder_phone(phone):
-            await self._notify("identify_user", "error", "No real phone number provided yet.")
+        if len(phone) != 10:
+            await self._notify(
+                "identify_user", "error", "Phone number is incomplete or malformed."
+            )
+            return (
+                f"That's only {len(phone)} digit(s) — a real phone number is 10 digits. The caller may "
+                "have paused partway through and gotten cut off, or only part of it was caught. Ask them "
+                "to say their full 10-digit phone number again, wait for the complete answer, then call "
+                "identify_user once with all 10 digits."
+            )
+        if looks_like_placeholder_phone(phone):
+            await self._notify(
+                "identify_user", "error", "No real phone number provided yet."
+            )
             return (
                 "You have not actually been told a phone number yet — that looks like a guessed or "
                 "placeholder value. Ask the caller to say their phone number out loud, wait for their "
@@ -140,7 +160,10 @@ class FrontDeskAgent(Agent):
         self.phone = phone
         self.name = info["name"]
         await self._notify(
-            "identify_user", "done", f"Caller identified ({phone})", {"phone": phone, "name": self.name}
+            "identify_user",
+            "done",
+            f"Caller identified ({phone})",
+            {"phone": phone, "name": self.name},
         )
         greeting = "Welcome back" if not info["is_new"] else "Got it, nice to meet you"
         return f"{greeting}. Caller identified with phone {phone}, name: {self.name or 'unknown'}."
@@ -158,7 +181,9 @@ class FrontDeskAgent(Agent):
         return f"Available slots: {json.dumps(slots)}"
 
     @function_tool()
-    async def book_appointment(self, date: str, time: str, name: str | None = None) -> str:
+    async def book_appointment(
+        self, date: str, time: str, name: str | None = None
+    ) -> str:
         """Book an appointment for the already-identified caller. Call identify_user first.
 
         Args:
@@ -171,11 +196,16 @@ class FrontDeskAgent(Agent):
         await self._notify("book_appointment", "running", f"Booking {date} {time}...")
         name = name or self.name
         try:
-            appt = await asyncio.to_thread(db.book_appointment, self.phone, name, date, time)
+            appt = await asyncio.to_thread(
+                db.book_appointment, self.phone, name, date, time
+            )
         except DoubleBookingError:
             alternatives = await asyncio.to_thread(db.available_slots, date)
             await self._notify(
-                "book_appointment", "error", f"Slot {date} {time} already booked", {"alternatives": alternatives}
+                "book_appointment",
+                "error",
+                f"Slot {date} {time} already booked",
+                {"alternatives": alternatives},
             )
             return (
                 f"That slot ({date} {time}) is already booked. Offer these alternatives: "
@@ -185,7 +215,10 @@ class FrontDeskAgent(Agent):
             await self._notify("book_appointment", "error", str(e))
             return str(e)
         await self._notify(
-            "book_appointment", "done", f"Booking confirmed for {date} {time} ✅", appt.to_dict()
+            "book_appointment",
+            "done",
+            f"Booking confirmed for {date} {time} ✅",
+            appt.to_dict(),
         )
         return f"Booking confirmed for {date} at {time}. Confirm this clearly to the caller."
 
@@ -202,7 +235,12 @@ class FrontDeskAgent(Agent):
         await self._notify("retrieve_appointments", "running", "Fetching bookings...")
         appts = await asyncio.to_thread(db.list_appointments, phone)
         data = [a.to_dict() for a in appts]
-        await self._notify("retrieve_appointments", "done", f"Found {len(data)} booking(s)", {"appointments": data})
+        await self._notify(
+            "retrieve_appointments",
+            "done",
+            f"Found {len(data)} booking(s)",
+            {"appointments": data},
+        )
         if not data:
             return "No appointments found for this caller."
         return f"Appointments: {json.dumps(data)}"
@@ -217,17 +255,25 @@ class FrontDeskAgent(Agent):
         """
         if not self.phone:
             return "Caller is not identified yet. Ask for their phone number and call identify_user first."
-        await self._notify("cancel_appointment", "running", f"Cancelling {date} {time}...")
+        await self._notify(
+            "cancel_appointment", "running", f"Cancelling {date} {time}..."
+        )
         try:
-            appt = await asyncio.to_thread(db.cancel_appointment, self.phone, date, time)
+            appt = await asyncio.to_thread(
+                db.cancel_appointment, self.phone, date, time
+            )
         except AppointmentNotFoundError as e:
             await self._notify("cancel_appointment", "error", str(e))
             return str(e)
-        await self._notify("cancel_appointment", "done", f"Cancelled {date} {time} ✅", appt.to_dict())
+        await self._notify(
+            "cancel_appointment", "done", f"Cancelled {date} {time} ✅", appt.to_dict()
+        )
         return f"Appointment on {date} at {time} has been cancelled. Confirm this to the caller."
 
     @function_tool()
-    async def modify_appointment(self, old_date: str, old_time: str, new_date: str, new_time: str) -> str:
+    async def modify_appointment(
+        self, old_date: str, old_time: str, new_date: str, new_time: str
+    ) -> str:
         """Reschedule an existing appointment to a new date/time.
 
         Args:
@@ -238,10 +284,17 @@ class FrontDeskAgent(Agent):
         """
         if not self.phone:
             return "Caller is not identified yet. Ask for their phone number and call identify_user first."
-        await self._notify("modify_appointment", "running", f"Rescheduling to {new_date} {new_time}...")
+        await self._notify(
+            "modify_appointment", "running", f"Rescheduling to {new_date} {new_time}..."
+        )
         try:
             appt = await asyncio.to_thread(
-                db.modify_appointment, self.phone, old_date, old_time, new_date, new_time
+                db.modify_appointment,
+                self.phone,
+                old_date,
+                old_time,
+                new_date,
+                new_time,
             )
         except DoubleBookingError as e:
             await self._notify("modify_appointment", "error", str(e))
@@ -253,7 +306,10 @@ class FrontDeskAgent(Agent):
             await self._notify("modify_appointment", "error", str(e))
             return str(e)
         await self._notify(
-            "modify_appointment", "done", f"Rescheduled to {new_date} {new_time} ✅", appt.to_dict()
+            "modify_appointment",
+            "done",
+            f"Rescheduled to {new_date} {new_time} ✅",
+            appt.to_dict(),
         )
         return f"Appointment moved to {new_date} at {new_time}. Confirm this clearly to the caller."
 
@@ -273,7 +329,11 @@ class FrontDeskAgent(Agent):
         async def _close():
             await asyncio.sleep(1.5)  # let the goodbye audio finish playing
             try:
-                appts = await asyncio.to_thread(db.list_appointments, self.phone) if self.phone else []
+                appts = (
+                    await asyncio.to_thread(db.list_appointments, self.phone)
+                    if self.phone
+                    else []
+                )
                 summary_text, preferences = await generate_call_summary(
                     self.session.history, self.name, self.phone, self.intent
                 )
@@ -286,10 +346,14 @@ class FrontDeskAgent(Agent):
                     preferences,
                     self.intent,
                 )
-                await self._notify("end_conversation", "done", "Call summary ready 📝", record)
+                await self._notify(
+                    "end_conversation", "done", "Call summary ready 📝", record
+                )
             except Exception:
                 logger.exception("failed to generate/save call summary")
-                await self._notify("end_conversation", "error", "Failed to generate summary")
+                await self._notify(
+                    "end_conversation", "error", "Failed to generate summary"
+                )
             await asyncio.sleep(1)
             self._job_ctx.shutdown()
 
@@ -304,13 +368,18 @@ async def entrypoint(ctx: JobContext):
 
     session = AgentSession(
         stt=deepgram.STT(model="nova-3", smart_format=True, numerals=True),
-        llm=groq.LLM(model="llama-3.3-70b-versatile", temperature=0.4),
+        # llama-3.3-70b's free-tier daily token quota is easy to exhaust during testing and
+        # has no fallback (the call just goes silent). 8b-instant has a separate quota pool,
+        # is plenty capable for this structured tool-calling flow, and is faster too.
+        llm=groq.LLM(model="llama-3.1-8b-instant", temperature=0.4),
         tts=cartesia.TTS(model="sonic-2", voice="f786b574-daa5-4673-aa0c-cbe3e8534c02"),
         turn_handling={
             # Default max_delay=2.5s is how long the model can wait, when unsure the
-            # caller has finished talking, before replying. That reads as dead air on
-            # a phone call, so cap it much tighter.
-            "endpointing": {"min_delay": 0.2, "max_delay": 0.8},
+            # caller has finished talking, before replying — that reads as dead air on a
+            # phone call. But capping it too tight (0.8s) was cutting people off mid-phone-
+            # number during the natural pause between digit groups ("nine seven oh...
+            # double four... five eight two"). 1.5s is the middle ground.
+            "endpointing": {"min_delay": 0.3, "max_delay": 1.5},
             # The default "adaptive" (ML-based) interruption detector ignores
             # min_duration/min_words entirely and uses its own probability threshold,
             # which was firing on sub-100ms noise bursts (breath, echo of the agent's own
@@ -342,7 +411,7 @@ async def entrypoint(ctx: JobContext):
 
     # A fixed greeting goes straight to TTS with no LLM round-trip, so there's no visible
     # "thinking" step between the avatar becoming ready and Aria actually speaking.
-    session.say("Hi, I'm Aria! I'm here to assist you — what brings you in today?")
+    session.say("Hi, I'm Aria! I'm here to assist you. What brings you in today?")
 
 
 if __name__ == "__main__":
