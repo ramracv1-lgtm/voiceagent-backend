@@ -288,12 +288,17 @@ async def entrypoint(ctx: JobContext):
         stt=deepgram.STT(model="nova-3", smart_format=True, numerals=True),
         llm=groq.LLM(model="llama-3.3-70b-versatile", temperature=0.4),
         tts=cartesia.TTS(model="sonic-2", voice="f786b574-daa5-4673-aa0c-cbe3e8534c02"),
-        # Default min_words=0 means any 0.5s noise burst (breath, echo of the agent's own
-        # voice through speakers) can be misread as a real interruption and cut the agent
-        # off mid-sentence. Requiring a couple of real words filters that out while still
-        # letting genuine barge-ins through.
-        min_interruption_duration=0.6,
-        min_interruption_words=2,
+        turn_handling={
+            # Default max_delay=2.5s is how long the model can wait, when unsure the
+            # caller has finished talking, before replying. That reads as dead air on
+            # a phone call, so cap it much tighter.
+            "endpointing": {"min_delay": 0.2, "max_delay": 0.8},
+            # Default min_words=0 means any 0.5s noise burst (breath, echo of the agent's
+            # own voice through speakers) can be misread as a real interruption and cut
+            # the agent off mid-sentence. Requiring a couple of real words filters that
+            # out while still letting genuine barge-ins through.
+            "interruption": {"min_duration": 0.6, "min_words": 2},
+        },
     )
 
     avatar = bey.AvatarSession(avatar_id=os.environ.get("BEY_AVATAR_ID") or None)
