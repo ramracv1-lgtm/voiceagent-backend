@@ -47,7 +47,11 @@ Conversation flow:
 1. Open warmly: welcome them to the clinic, ask how they're doing today, then ask how you can help.
    Keep it to 1-2 short sentences — warm, not gushing.
 2. Before doing anything account-specific (booking, retrieving, cancelling, modifying), you MUST identify the caller:
-   ask for their phone number and call `identify_user`. Also ask their name if you don't have it yet, and pass it in.
+   ask for their phone number, WAIT for them to actually say it, and only then call `identify_user` with the
+   exact digits they spoke. Also ask their name if you don't have it yet, and pass it in.
+   NEVER call `identify_user` with a guessed, example, or placeholder phone number (e.g. "123456789",
+   "unknown", "0000000000"). If the caller hasn't said their number yet, ask for it and wait — do not call
+   any tool until you have their real spoken number.
 3. To book an appointment: find out what date/timeframe they want, call `fetch_slots` to see real availability,
    offer 2-3 concrete options out loud, then call `book_appointment` once they pick one. Always confirm the
    final date and time back to the caller clearly after booking.
@@ -70,6 +74,15 @@ PHONE_RE = re.compile(r"\D")
 def normalize_phone(raw: str) -> str:
     digits = PHONE_RE.sub("", raw)
     return digits[-10:] if len(digits) >= 10 else digits
+
+
+def looks_like_placeholder_phone(digits: str) -> bool:
+    """Catches LLM-hallucinated numbers (sequential, repeated-digit) that would
+    otherwise pass basic length validation, e.g. "123456789" or "0000000000"."""
+    if len(set(digits)) <= 2:
+        return True
+    deltas = {(int(b) - int(a)) % 10 for a, b in zip(digits, digits[1:])}
+    return deltas in ({1}, {9})  # strictly ascending or strictly descending
 
 
 class FrontDeskAgent(Agent):
@@ -115,9 +128,13 @@ class FrontDeskAgent(Agent):
         """
         await self._notify("identify_user", "running", "Looking up caller...")
         phone = normalize_phone(phone_number)
-        if len(phone) < 7:
-            await self._notify("identify_user", "error", "Invalid phone number provided.")
-            return "That phone number doesn't look valid. Please ask the caller to repeat it."
+        if len(phone) < 7 or looks_like_placeholder_phone(phone):
+            await self._notify("identify_user", "error", "No real phone number provided yet.")
+            return (
+                "You have not actually been told a phone number yet — that looks like a guessed or "
+                "placeholder value. Ask the caller to say their phone number out loud, wait for their "
+                "answer, then call identify_user again with exactly what they said."
+            )
         info = await asyncio.to_thread(db.get_or_create_user, phone, caller_name)
         self.phone = phone
         self.name = info["name"]
