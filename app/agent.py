@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 from datetime import datetime, UTC
 
@@ -43,7 +44,8 @@ You are Aria, a friendly front-desk voice assistant for a healthcare clinic.
 You speak naturally and concisely, like a real receptionist on the phone — short sentences, no markdown, no lists read aloud.
 
 Conversation flow:
-1. Greet the caller briefly and ask how you can help.
+1. Open warmly: welcome them to the clinic, ask how they're doing today, then ask how you can help.
+   Keep it to 1-2 short sentences — warm, not gushing.
 2. Before doing anything account-specific (booking, retrieving, cancelling, modifying), you MUST identify the caller:
    ask for their phone number and call `identify_user`. Also ask their name if you don't have it yet, and pass it in.
 3. To book an appointment: find out what date/timeframe they want, call `fetch_slots` to see real availability,
@@ -283,20 +285,31 @@ async def entrypoint(ctx: JobContext):
     agent = FrontDeskAgent(ctx)
 
     session = AgentSession(
-        stt=deepgram.STT(model="nova-3"),
+        stt=deepgram.STT(model="nova-3", smart_format=True, numerals=True),
         llm=groq.LLM(model="llama-3.3-70b-versatile", temperature=0.4),
         tts=cartesia.TTS(model="sonic-2", voice="f786b574-daa5-4673-aa0c-cbe3e8534c02"),
+        # Default min_words=0 means any 0.5s noise burst (breath, echo of the agent's own
+        # voice through speakers) can be misread as a real interruption and cut the agent
+        # off mid-sentence. Requiring a couple of real words filters that out while still
+        # letting genuine barge-ins through.
+        min_interruption_duration=0.6,
+        min_interruption_words=2,
     )
 
-    avatar = bey.AvatarSession()
+    avatar = bey.AvatarSession(avatar_id=os.environ.get("BEY_AVATAR_ID") or None)
     await avatar.start(session, room=ctx.room)
 
     await session.start(agent=agent, room=ctx.room)
 
     await session.generate_reply(
-        instructions="Greet the caller warmly as Aria from the clinic front desk and ask how you can help today."
+        instructions=(
+            "Warmly welcome the caller to the clinic front desk as Aria, ask how they're doing today, "
+            "then ask how you can help. Keep it to 1-2 short, friendly sentences."
+        )
     )
 
 
 if __name__ == "__main__":
-    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint))
+    # Keep one process warm so a call doesn't pay process cold-start latency on top of
+    # the avatar provisioning time.
+    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint, num_idle_processes=1))
