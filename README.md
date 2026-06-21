@@ -19,10 +19,10 @@ A LiveKit Agents (Python) voice pipeline for a healthcare front-desk AI: Deepgra
 
 ## Setup
 
+Dependencies are managed with [uv](https://docs.astral.sh/uv/) (`pyproject.toml` + `uv.lock`).
+
 ```bash
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+uv sync               # creates .venv and installs locked dependencies
 cp .env.example .env   # fill in your keys
 ```
 
@@ -39,10 +39,10 @@ Two processes:
 
 ```bash
 # Terminal 1 — REST API (token issuance, appointments/summary reads)
-uvicorn app.server:app --reload --port 8000
+uv run uvicorn app.server:app --reload --port 8000
 
 # Terminal 2 — the voice agent worker (connects out to LiveKit Cloud)
-python -m app.agent dev
+uv run python -m app.agent dev
 ```
 
 The frontend talks to `:8000` for tokens/REST, and to LiveKit Cloud directly (via the token) for the
@@ -50,9 +50,10 @@ realtime room — including the avatar video track and the `tool-status` data ev
 
 ## Deployment (Railway)
 
-Create **two services** in one Railway project from this repo:
-1. **api** — start command `uvicorn app.server:app --host 0.0.0.0 --port $PORT`
-2. **worker** — start command `python -m app.agent start`
+Create **two services** in one Railway project from this repo (Railway auto-detects `uv` via
+`pyproject.toml`/`uv.lock` through Nixpacks):
+1. **api** — start command `uv run uvicorn app.server:app --host 0.0.0.0 --port $PORT`
+2. **worker** — start command `uv run python -m app.agent start`
 
 Set the same env vars (from `.env.example`) on both services.
 
