@@ -401,7 +401,10 @@ async def entrypoint(ctx: JobContext):
     avatar = bey.AvatarSession(avatar_id=os.environ.get("BEY_AVATAR_ID") or None)
     await avatar.start(session, room=ctx.room)
 
-    await session.start(agent=agent, room=ctx.room)
+    # We don't use LiveKit Cloud's own session recording/observability (we generate and
+    # store our own transcript-based summary in SQLite) — disable it so its OTLP uploads
+    # don't keep hitting the free-tier ingestion quota and spamming the logs with 429s.
+    await session.start(agent=agent, room=ctx.room, record=False)
 
     # The instant the avatar's tracks are subscribed, both its audio-relay buffer and the
     # receiving browser's WebRTC jitter buffer are still stabilizing on a brand-new track —
