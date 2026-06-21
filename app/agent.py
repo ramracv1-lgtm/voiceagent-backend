@@ -53,6 +53,9 @@ Conversation flow:
    NEVER call `identify_user` with a guessed, example, or placeholder phone number (e.g. "123456789",
    "unknown", "0000000000"). If the caller hasn't said their number yet, ask for it and wait — do not call
    any tool until you have their real spoken number.
+   The caller addressing you by name ("Hi Aria", "thanks Aria") is NOT them introducing themselves —
+   never record "Aria" (or anything close to it) as the caller's own name. Only treat it as their name
+   when they actually introduce themselves (e.g. "my name is X", "this is X", "I'm X").
 2. To book an appointment: find out what date/timeframe they want, call `fetch_slots` to see real availability,
    offer 2-3 concrete options out loud, then call `book_appointment` once they pick one. Always confirm the
    final date and time back to the caller clearly after booking.
@@ -84,6 +87,25 @@ def looks_like_placeholder_phone(digits: str) -> bool:
         return True
     deltas = {(int(b) - int(a)) % 10 for a, b in zip(digits, digits[1:])}
     return deltas in ({1}, {9})  # strictly ascending or strictly descending
+
+
+def _edit_distance(a: str, b: str) -> int:
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i] + [0] * len(b)
+        for j, cb in enumerate(b, 1):
+            cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb))
+        prev = cur
+    return prev[-1]
+
+
+def looks_like_bot_name(name: str) -> bool:
+    """Catches the caller addressing the agent ("Hi Aria") being misread as the caller
+    introducing themselves, including likely mis-hearings of "Aria" (e.g. "Adia"). Requires
+    the same length as "aria" so real names that merely contain those letters (Maria, Ria)
+    aren't caught — only single-letter-substitution mis-hearings are."""
+    cleaned = name.strip().lower()
+    return len(cleaned) == len("aria") and _edit_distance(cleaned, "aria") <= 1
 
 
 class FrontDeskAgent(Agent):
@@ -136,6 +158,10 @@ class FrontDeskAgent(Agent):
             caller_name: The caller's name, if they have given it.
         """
         await self._notify("identify_user", "running", "Looking up caller...")
+        if caller_name and looks_like_bot_name(caller_name):
+            # The caller said something like "Hi Aria" (addressing the agent), and that got
+            # misread as them introducing themselves. Drop it rather than save a wrong name.
+            caller_name = None
         phone = normalize_phone(phone_number)
         if len(phone) != 10:
             await self._notify(
@@ -194,6 +220,8 @@ class FrontDeskAgent(Agent):
         if not self.phone:
             return "Caller is not identified yet. Ask for their phone number and call identify_user first."
         await self._notify("book_appointment", "running", f"Booking {date} {time}...")
+        if name and looks_like_bot_name(name):
+            name = None
         name = name or self.name
         try:
             appt = await asyncio.to_thread(
