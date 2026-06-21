@@ -293,11 +293,12 @@ async def entrypoint(ctx: JobContext):
             # caller has finished talking, before replying. That reads as dead air on
             # a phone call, so cap it much tighter.
             "endpointing": {"min_delay": 0.2, "max_delay": 0.8},
-            # Default min_words=0 means any 0.5s noise burst (breath, echo of the agent's
-            # own voice through speakers) can be misread as a real interruption and cut
-            # the agent off mid-sentence. Requiring a couple of real words filters that
-            # out while still letting genuine barge-ins through.
-            "interruption": {"min_duration": 0.6, "min_words": 2},
+            # The default "adaptive" (ML-based) interruption detector ignores
+            # min_duration/min_words entirely and uses its own probability threshold,
+            # which was firing on sub-100ms noise bursts (breath, echo of the agent's own
+            # voice through speakers) and cutting the agent off mid-sentence. "vad" mode
+            # is deterministic and actually honors these thresholds.
+            "interruption": {"mode": "vad", "min_duration": 0.6, "min_words": 2},
         },
     )
 
