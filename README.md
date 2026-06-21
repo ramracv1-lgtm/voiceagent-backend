@@ -31,7 +31,7 @@ Required keys (see `.env.example`):
 - `DEEPGRAM_API_KEY` — deepgram.com (free trial credit)
 - `GROQ_API_KEY` — console.groq.com (free tier, used for both conversation + summary)
 - `CARTESIA_API_KEY` — cartesia.ai (free trial credit)
-- `BEY_API_KEY` — app.bey.dev (Beyond Presence; the default stock avatar works with no `avatar_id`)
+- `BEY_API_KEY` — app.bey.chat/settings (Beyond Presence; the default stock avatar works with no `avatar_id`)
 
 ## Run locally
 
