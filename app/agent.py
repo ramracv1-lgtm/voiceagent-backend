@@ -132,6 +132,13 @@ class FrontDeskAgent(Agent):
         self.intent: str | None = None
         self.preferences: list[str] = []
         self.ended = False
+        self._summary_saved = False
+        # Set by entrypoint right after the AgentSession is created. The shutdown
+        # callback runs *after* the session has already closed, at which point the
+        # inherited `self.session` property raises (it requires a live activity
+        # context) — this direct reference lets save_call_summary still reach
+        # `.history`, which is just a plain attribute unaffected by that teardown.
+        self._session: AgentSession | None = None
 
     # ---- UI event helper -------------------------------------------------
 
@@ -366,43 +373,54 @@ class FrontDeskAgent(Agent):
 
         async def _close():
             await asyncio.sleep(1.5)  # let the goodbye audio finish playing
-            try:
-                appts = (
-                    await asyncio.to_thread(db.list_appointments, self.phone)
-                    if self.phone
-                    else []
-                )
-                summary_text, preferences = await generate_call_summary(
-                    self.session.history, self.name, self.phone, self.intent
-                )
-                record = await asyncio.to_thread(
-                    db.save_call_summary,
-                    self.phone,
-                    self._room.name,
-                    summary_text,
-                    [a.to_dict() for a in appts],
-                    preferences,
-                    self.intent,
-                )
-                await self._notify(
-                    "end_conversation", "done", "Call summary ready 📝", record
-                )
-            except Exception:
-                logger.exception("failed to generate/save call summary")
-                await self._notify(
-                    "end_conversation", "error", "Failed to generate summary"
-                )
-            await asyncio.sleep(1)
             self._job_ctx.shutdown()
 
         asyncio.create_task(_close())
         return "Say a brief, warm goodbye to the caller now. Do not call any other tool after this."
+
+    # ---- Shutdown -----------------------------------------------------------
+
+    async def save_call_summary(self) -> None:
+        """Generate and persist the call summary. Registered as a job shutdown callback
+        so it runs exactly once no matter how the call ends — the caller saying bye
+        (end_conversation -> ctx.shutdown()), hitting Leave, a dropped connection, or a
+        crash. Generating it only from inside end_conversation would skip every call that
+        doesn't end that exact way."""
+        if self._summary_saved:
+            return
+        self._summary_saved = True
+        try:
+            appts = (
+                await asyncio.to_thread(db.list_appointments, self.phone)
+                if self.phone
+                else []
+            )
+            summary_text, preferences = await generate_call_summary(
+                self._session.history, self.name, self.phone, self.intent
+            )
+            await asyncio.to_thread(
+                db.save_call_summary,
+                self.phone,
+                self._room.name,
+                summary_text,
+                [a.to_dict() for a in appts],
+                preferences,
+                self.intent,
+            )
+            logger.info("call summary saved", extra={"room": self._room.name})
+            # No _notify here: by the time a shutdown callback runs, the room has
+            # already closed (this fires after AgentSession teardown), so the
+            # data-channel publish would just fail. The frontend gets the summary by
+            # polling the REST endpoint after disconnect, not over the data channel.
+        except Exception:
+            logger.exception("failed to generate/save call summary")
 
 
 async def entrypoint(ctx: JobContext):
     await ctx.connect()
 
     agent = FrontDeskAgent(ctx)
+    ctx.add_shutdown_callback(agent.save_call_summary)
 
     session = AgentSession(
         stt=deepgram.STT(model="nova-3", smart_format=True, numerals=True),
@@ -410,8 +428,14 @@ async def entrypoint(ctx: JobContext):
         # load (leaking raw "<function=...>" text instead of real tool calls, dropping
         # turns silently). 70b is far more reliable for this; the free-tier daily quota is
         # still finite, but the rate-limit handler below now degrades gracefully instead of
-        # going dead silent if it's ever hit mid-call.
-        llm=groq.LLM(model="llama-3.3-70b-versatile", temperature=0.4),
+        # going dead silent if it's ever hit mid-call. Override locally via
+        # GROQ_CONVERSATION_MODEL (e.g. to llama-3.1-8b-instant, a separate quota pool) if
+        # you've burned through 70b's daily quota mid-testing — don't leave it overridden
+        # for an actual demo, it's the less reliable model.
+        llm=groq.LLM(
+            model=os.environ.get("GROQ_CONVERSATION_MODEL", "llama-3.3-70b-versatile"),
+            temperature=0.4,
+        ),
         tts=cartesia.TTS(model="sonic-2", voice="f786b574-daa5-4673-aa0c-cbe3e8534c02"),
         turn_handling={
             # Default max_delay=2.5s is how long the model can wait, when unsure the
@@ -437,6 +461,7 @@ async def entrypoint(ctx: JobContext):
             },
         },
     )
+    agent._session = session
 
     # Groq's free-tier rate/quota limits mean an LLM call can fail even after the SDK's
     # own internal retries are exhausted. Left alone, AgentSession just drops that turn

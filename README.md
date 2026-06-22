@@ -50,12 +50,19 @@ realtime room — including the avatar video track and the `tool-status` data ev
 
 ## Deployment (Railway)
 
-Create **two services** in one Railway project from this repo (Railway auto-detects `uv` via
-`pyproject.toml`/`uv.lock` through Nixpacks):
+**Single service (recommended unless `Database` is backed by a real shared DB):** deploy one
+Railway service with start command `uv run python -m app.combined start`. This runs the FastAPI
+side-car and the LiveKit agent worker in the same container, sharing one filesystem — needed
+because SQLite is a local file with no built-in replication. Splitting them into two services
+(below) gives each one its own disk, so the worker's writes (appointments, call summaries) are
+invisible to the api service's reads and `/api/summary/...`/`/api/appointments/...` will 404
+forever.
+
+**Two services** (only if you've moved `Database` onto something shared, e.g. Postgres):
 1. **api** — start command `uv run uvicorn app.server:app --host 0.0.0.0 --port $PORT`
 2. **worker** — start command `uv run python -m app.agent start`
 
-Set the same env vars (from `.env.example`) on both services.
+Set the same env vars (from `.env.example`) on whichever service(s) you use.
 
 ## Cost per call (rough)
 
