@@ -548,6 +548,9 @@ async def entrypoint(ctx: JobContext):
 
 
 if __name__ == "__main__":
-    # Keep one process warm so a call doesn't pay process cold-start latency on top of
-    # the avatar provisioning time.
-    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint, num_idle_processes=1))
+    # Keep a couple of processes warm so back-to-back calls don't race for the single
+    # idle process — a second call arriving while the first is still active had nothing
+    # to dispatch to and LiveKit Cloud just gave up on it after a timeout, silently
+    # (room created, but no agent ever joined). 2 covers quick consecutive test calls
+    # without keeping too many idle processes warm.
+    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint, num_idle_processes=2))

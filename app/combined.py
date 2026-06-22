@@ -24,7 +24,9 @@ def main() -> None:
         [sys.executable, "-m", "uvicorn", "app.server:app", "--host", "0.0.0.0", "--port", port]
     )
     try:
-        cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint, num_idle_processes=1))
+        # 2 idle processes so back-to-back calls don't race for a single warm slot —
+        # see the matching comment in app/agent.py's __main__ block.
+        cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint, num_idle_processes=2))
     finally:
         api_proc.terminate()
         api_proc.wait()
