@@ -60,6 +60,9 @@ Conversation flow:
    NEVER call `identify_user` with a guessed, example, or placeholder phone number (e.g. "123456789",
    "unknown", "0000000000"). If the caller hasn't said their number yet, ask for it and wait — do not call
    any tool until you have their real spoken number.
+   If the caller says something like "one sec", "hold on", "give me a second", or "wait" instead of
+   actually answering, that is NOT their name or phone number — it's them asking for a moment. Just
+   acknowledge briefly ("sure, take your time") and wait for their real answer before calling any tool.
    The caller addressing you by name ("Hi Aria", "thanks Aria") is NOT them introducing themselves —
    never record "Aria" (or anything close to it) as the caller's own name. Only treat it as their name
    when they actually introduce themselves (e.g. "my name is X", "this is X", "I'm X").
@@ -432,6 +435,41 @@ async def entrypoint(ctx: JobContext):
             },
         },
     )
+
+    # Groq's free-tier rate/quota limits mean an LLM call can fail even after the SDK's
+    # own internal retries are exhausted. Left alone, AgentSession just drops that turn
+    # silently (counts it, but only acts after 3 *consecutive* failures) — from the
+    # caller's side that's dead air with no explanation. Nudge them once or twice instead,
+    # and if it keeps failing, end the call gracefully rather than leaving them hanging.
+    llm_failure_streak = 0
+
+    def _on_session_error(ev) -> None:
+        nonlocal llm_failure_streak
+        err = ev.error
+        if getattr(err, "recoverable", True) or getattr(err, "type", None) != "llm_error":
+            return  # already being retried internally, or not an LLM issue
+        llm_failure_streak += 1
+        logger.warning(
+            "LLM call failed after internal retries (streak=%d): %r",
+            llm_failure_streak,
+            err.error,
+        )
+        if llm_failure_streak < 3:
+            session.say("Sorry, I'm having a little trouble on my end — could you say that again?")
+        else:
+            session.say(
+                "I'm really sorry, I'm having technical difficulties right now. "
+                "Please try calling back in a few minutes."
+            )
+            ctx.shutdown()
+
+    def _on_item_added(ev) -> None:
+        nonlocal llm_failure_streak
+        if getattr(ev.item, "role", None) == "assistant":
+            llm_failure_streak = 0
+
+    session.on("error", _on_session_error)
+    session.on("conversation_item_added", _on_item_added)
 
     avatar = bey.AvatarSession(avatar_id=os.environ.get("BEY_AVATAR_ID") or None)
     await avatar.start(session, room=ctx.room)
