@@ -371,8 +371,31 @@ class FrontDeskAgent(Agent):
         self.intent = intent_summary or self.intent
         await self._notify("end_conversation", "running", "Wrapping up the call...")
 
+        # A fixed sleep here was guessing how long the goodbye takes to speak — too short
+        # for a longer goodbye (or with the avatar relay's extra latency) and it cuts off
+        # the tail end of the sentence, which is exactly the "can't hear the last
+        # sentence" symptom. Instead, capture the SpeechHandle for the goodbye reply (the
+        # next speech generated after this tool returns) and wait for its actual playout
+        # to finish — this accounts for the avatar relay too, since "playback_finished"
+        # only fires once that side reports it. Falls back to a short sleep if no speech
+        # shows up in time (e.g. the model didn't actually say anything).
+        speech_ready = asyncio.Event()
+        captured: dict[str, object] = {}
+
+        def _on_speech_created(ev) -> None:
+            captured["handle"] = ev.speech_handle
+            speech_ready.set()
+
+        self.session.on("speech_created", _on_speech_created)
+
         async def _close():
-            await asyncio.sleep(1.5)  # let the goodbye audio finish playing
+            try:
+                await asyncio.wait_for(speech_ready.wait(), timeout=5)
+                await captured["handle"].wait_for_playout()
+            except (TimeoutError, asyncio.TimeoutError):
+                await asyncio.sleep(1.5)
+            finally:
+                self.session.off("speech_created", _on_speech_created)
             self._job_ctx.shutdown()
 
         asyncio.create_task(_close())
