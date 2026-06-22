@@ -473,8 +473,15 @@ async def entrypoint(ctx: JobContext):
     session.on("error", _on_session_error)
     session.on("conversation_item_added", _on_item_added)
 
-    avatar = bey.AvatarSession(avatar_id=os.environ.get("BEY_AVATAR_ID") or None)
-    await avatar.start(session, room=ctx.room)
+    # Diagnostic escape hatch: the TTS audio normally gets relayed through Beyond Presence's
+    # cloud (lip-sync rendering) before it's republished to the room — an extra network hop
+    # and real-time re-encode that's a likely source of the recurring choppy/garbled audio
+    # reports. Setting DISABLE_AVATAR=true skips that relay entirely (no avatar video, but
+    # audio goes straight from our own TTS to the room) to confirm whether the avatar path
+    # is the cause.
+    if os.environ.get("DISABLE_AVATAR", "").lower() != "true":
+        avatar = bey.AvatarSession(avatar_id=os.environ.get("BEY_AVATAR_ID") or None)
+        await avatar.start(session, room=ctx.room)
 
     # We don't use LiveKit Cloud's own session recording/observability (we generate and
     # store our own transcript-based summary in SQLite) — disable it so its OTLP uploads
