@@ -1,3 +1,13 @@
+---
+title: Voice Agent Backend
+emoji: 📞
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # Voice AI Front Desk — Backend
 
 A LiveKit Agents (Python) voice pipeline for a healthcare front-desk AI: Deepgram STT → Groq LLM
