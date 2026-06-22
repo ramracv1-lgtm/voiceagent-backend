@@ -406,10 +406,12 @@ async def entrypoint(ctx: JobContext):
 
     session = AgentSession(
         stt=deepgram.STT(model="nova-3", smart_format=True, numerals=True),
-        # llama-3.3-70b's free-tier daily token quota is easy to exhaust during testing and
-        # has no fallback (the call just goes silent). 8b-instant has a separate quota pool,
-        # is plenty capable for this structured tool-calling flow, and is faster too.
-        llm=groq.LLM(model="llama-3.1-8b-instant", temperature=0.4),
+        # 8b-instant kept breaking tool-calling under this agent's 7-tool/long-instruction
+        # load (leaking raw "<function=...>" text instead of real tool calls, dropping
+        # turns silently). 70b is far more reliable for this; the free-tier daily quota is
+        # still finite, but the rate-limit handler below now degrades gracefully instead of
+        # going dead silent if it's ever hit mid-call.
+        llm=groq.LLM(model="llama-3.3-70b-versatile", temperature=0.4),
         tts=cartesia.TTS(model="sonic-2", voice="f786b574-daa5-4673-aa0c-cbe3e8534c02"),
         turn_handling={
             # Default max_delay=2.5s is how long the model can wait, when unsure the
